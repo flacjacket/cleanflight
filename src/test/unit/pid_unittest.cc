@@ -50,14 +50,14 @@ extern "C" {
     extern pidControllerFuncPtr pid_controller;
     extern uint8_t PIDweight[3];
     float dT; // dT for pidLuxFloat
-    float unittest_pidLuxFloat_lastError[3];
+    float unittest_pidLuxFloat_lastErrorForDelta[3];
     float unittest_pidLuxFloat_delta1[3];
     float unittest_pidLuxFloat_delta2[3];
     float unittest_pidLuxFloat_PTerm[3];
     float unittest_pidLuxFloat_ITerm[3];
     float unittest_pidLuxFloat_DTerm[3];
     int32_t cycleTime; // cycleTime for pidMultiWiiRewrite
-    int32_t unittest_pidMultiWiiRewrite_lastError[3];
+    int32_t unittest_pidMultiWiiRewrite_lastErrorForDelta[3];
     int32_t unittest_pidMultiWiiRewrite_PTerm[3];
     int32_t unittest_pidMultiWiiRewrite_ITerm[3];
     int32_t unittest_pidMultiWiiRewrite_DTerm[3];
@@ -151,7 +151,7 @@ void pidControllerInitLuxFloat(pidProfile_t *pidProfile, controlRateConfig_t *co
     controlRate->rates[YAW] = 90;
     // reset the pidLuxFloat static values
     for (int ii = FD_ROLL; ii <= FD_YAW; ++ii) {
-        unittest_pidLuxFloat_lastError[ii] = 0.0f;
+        unittest_pidLuxFloat_lastErrorForDelta[ii] = 0.0f;
         unittest_pidLuxFloat_delta1[ii] = 0.0f;
         unittest_pidLuxFloat_delta2[ii] = 0.0f;
     }
@@ -525,7 +525,7 @@ void pidControllerInitMultiWiiRewrite(pidProfile_t *pidProfile, controlRateConfi
     controlRate->rates[YAW] = 73;
     // reset the pidMultiWiiRewrite static values
     for (int ii = FD_ROLL; ii <= FD_YAW; ++ii) {
-        unittest_pidMultiWiiRewrite_lastError[ii] = 0;
+        unittest_pidMultiWiiRewrite_lastErrorForDelta[ii] = 0;
     }
 }
 
