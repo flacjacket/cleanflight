@@ -102,6 +102,7 @@ void resetPidProfile(pidProfile_t *pidProfile)
     pidProfile->gyro_soft_lpf = 0;   // no filtering by default
     pidProfile->yaw_pterm_cut_hz = 0;
     pidProfile->dterm_cut_hz = 0;
+    pidProfile->deltaMethod = DELTA_FROM_ERROR;
 
     pidProfile->P_f[FD_ROLL] = 1.4f;     // new PID with preliminary defaults test carefully
     pidProfile->I_f[FD_ROLL] = 0.4f;
