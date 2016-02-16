@@ -238,6 +238,23 @@ TEST_F(BasicMixerIntegrationTest, TestTricopterServo)
     // and
     axisPID[YAW] = 0;
 
+    // and
+    batteryConfig_t defaultBatteryConfig = {
+        .vbatscale = VBAT_SCALE_DEFAULT,
+        .vbatresdivval = VBAT_RESDIVVAL_DEFAULT,
+        .vbatresdivmultiplier = VBAT_RESDIVMULTIPLIER_DEFAULT,
+        .vbatmaxcellvoltage = 43,
+        .vbatmincellvoltage = 33,
+        .vbatwarningcellvoltage = 35,
+        .vbatPidCompensation = 0,
+        .currentMeterScale = 400,
+        .currentMeterOffset = 0,
+        .currentMeterType = CURRENT_SENSOR_ADC,
+        .multiwiiCurrentMeterOutput = 0,
+        .batteryCapacity = 0,
+    };
+    batteryConfig = &defaultBatteryConfig;
+
     // when
     mixTable();
     writeServos();
