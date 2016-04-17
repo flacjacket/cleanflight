@@ -61,13 +61,14 @@ static void ledStripDisable(void);
 static uint32_t nextAnimationUpdateAt = 0;
 #endif
 
-static uint32_t nextIndicatorFlashAt = 0;
+//static uint32_t nextIndicatorFlashAt = 0;
 static uint32_t nextWarningFlashAt = 0;
 static uint32_t nextRotationUpdateAt = 0;
 
 #define LED_STRIP_20HZ ((1000 * 1000) / 20)
 #define LED_STRIP_10HZ ((1000 * 1000) / 10)
 #define LED_STRIP_5HZ ((1000 * 1000) / 5)
+#define LED_STRIP_1HZ ((1000 * 1000) / 1)
 
 #if MAX_LED_STRIP_LENGTH > WS2811_LED_STRIP_LENGTH
 #error "Led strip length must match driver"
@@ -164,6 +165,7 @@ typedef struct modeColorIndexes_s {
 // be different.
 // See colors[] and defaultColors[] and applyDefaultColors[]
 
+/*
 static const modeColorIndexes_t orientationModeColors = {
         COLOR_WHITE,
         COLOR_DARK_VIOLET,
@@ -219,6 +221,7 @@ static const modeColorIndexes_t baroModeColors = {
         COLOR_BLUE,
         COLOR_ORANGE
 };
+*/
 
 
 uint8_t ledGridWidth;
@@ -541,6 +544,7 @@ void generateLedConfig(uint8_t ledIndex, char *ledConfigBuffer, size_t bufferSiz
     sprintf(ledConfigBuffer, "%u,%u:%s:%s:%u", GET_LED_X(ledConfig), GET_LED_Y(ledConfig), directions, functions, ledConfig->color);
 }
 
+/*
 void applyDirectionalModeColor(const uint8_t ledIndex, const ledConfig_t *ledConfig, const modeColorIndexes_t *modeColors)
 {
     // apply up/down colors regardless of quadrant.
@@ -654,16 +658,110 @@ void applyLedModeLayer(void)
         }
     }
 }
+*/
 
 typedef enum {
     WARNING_FLAG_NONE = 0,
     WARNING_FLAG_LOW_BATTERY = (1 << 0),
     WARNING_FLAG_FAILSAFE = (1 << 1),
-    WARNING_FLAG_ARMING_DISABLED = (1 << 2)
+    WARNING_FLAG_ARMING_DISABLED = (1 << 2),
+    WARNING_FLAG_RX_MISSING = (1 << 3)
 } warningFlags_e;
 
-static uint8_t warningFlags = WARNING_FLAG_NONE;
+#define WARNING_SEQUENCE_LENGTH 6
+void applyLedRingWarningLayer(uint8_t updateNow) {
+    static uint8_t warningFlashCounter = 0;
+    static uint8_t warningFlags = WARNING_FLAG_NONE;
+    static uint8_t warningSeqLen = 1;
 
+    const ledConfig_t *ledConfig;
+    uint8_t ledIndex;
+    uint8_t ledRingIndex = 0;
+    const hsvColor_t* warningColors[WARNING_SEQUENCE_LENGTH] = {NULL, NULL, NULL, NULL, NULL, NULL};
+
+    if (updateNow) {
+        warningFlags = WARNING_FLAG_NONE;
+        if (feature(FEATURE_VBAT) && getBatteryState() != BATTERY_OK) {
+            warningFlags |= WARNING_FLAG_LOW_BATTERY;
+        }
+        if (feature(FEATURE_FAILSAFE) && failsafeIsActive()) {
+            warningFlags |= WARNING_FLAG_FAILSAFE;
+        }
+        if (!ARMING_FLAG(ARMED) && !ARMING_FLAG(OK_TO_ARM)) {
+            warningFlags |= WARNING_FLAG_ARMING_DISABLED;
+        }
+        if (!rxIsReceivingSignal()) {
+            warningFlags |= WARNING_FLAG_RX_MISSING;
+        }
+    }
+
+    if (warningFlags) {
+        // Trigger correct warning flag
+        if (warningFlags & WARNING_FLAG_FAILSAFE) {
+            // Failsafe - alternate all red, all black
+            warningSeqLen = 1;
+
+            if (warningFlashCounter % 2) {
+                warningColors[0] = &hsv_red;
+            } else {
+                warningColors[0] = &hsv_black;
+            }
+        } else if (warningFlags & WARNING_FLAG_LOW_BATTERY) {
+            // low battery - circulate PinkPinkBlackBlack
+            warningSeqLen = 4;
+
+            warningColors[(warningFlashCounter + 0) % 4] = &hsv_deepPink;
+            warningColors[(warningFlashCounter + 1) % 4] = &hsv_deepPink;
+            warningColors[(warningFlashCounter + 2) % 4] = &hsv_black;
+            warningColors[(warningFlashCounter + 3) % 4] = &hsv_black;
+        } else {
+            // no Rx or arming otherwise disabled, flash warning color in corners
+            const hsvColor_t *ledColor = NULL;
+            warningSeqLen = 6;
+
+            if (warningFlags & WARNING_FLAG_RX_MISSING) {
+                ledColor = &hsv_red;
+            } else if (warningFlags & WARNING_FLAG_ARMING_DISABLED) {
+                ledColor = &hsv_orange;
+            }
+
+            if (warningFlashCounter % 2) {
+                warningColors[1] = ledColor;
+            } else {
+                warningColors[4] = ledColor;
+            }
+        }
+    } else if (!ARMING_FLAG(ARMED)) {
+        // Neither a warning, nor armed, circulate BlueNullNull
+        warningSeqLen = 3;
+        warningColors[warningFlashCounter % 3] = &hsv_blue;
+    } else {
+        warningSeqLen = 0;
+    }
+
+    // Update the ring
+    if (warningSeqLen) {
+        for (ledIndex = 0; ledIndex < ledCount; ledIndex++) {
+            ledConfig = &ledConfigs[ledIndex];
+
+            if ((ledConfig->flags & LED_FUNCTION_THRUST_RING) == 0) {
+                continue;
+            }
+
+            if (warningColors[ledRingIndex % warningSeqLen]) {
+                setLedHsv(ledIndex, warningColors[ledRingIndex % warningSeqLen]);
+            }
+
+            ledRingIndex++;
+        }
+    }
+
+    // Update the counter
+    if (updateNow) {
+        warningFlashCounter = (warningFlashCounter + 1) % 12;
+    }
+}
+/*
 void applyLedWarningLayer(uint8_t updateNow)
 {
     const ledConfig_t *ledConfig;
@@ -790,9 +888,20 @@ void applyLedThrottleLayer()
         setLedHsv(ledIndex, &color);
     }
 }
+*/
 
-#define ROTATION_SEQUENCE_LED_COUNT 6 // 2 on, 4 off
-#define ROTATION_SEQUENCE_LED_WIDTH 2
+#define ROTATION_SEQUENCE_LED_COUNT 12
+#define ROTATION_SEQUENCE_COUNT 7
+static bool rotationSequence[ROTATION_SEQUENCE_COUNT][ROTATION_SEQUENCE_LED_COUNT] = {
+    {1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0}, // 2 lights
+    {1, 0, 0, 0, 1 ,0 ,0 ,0, 1 ,0 ,0, 0}, // 3 lights
+    {1, 0, 0, 1, 0, 0, 1, 0, 0, 1 ,0 ,0}, // 4 lights
+    {1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0}, // 6 lights
+    {1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0}, // 8 lights
+    {1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0}, // 9 lights
+    {1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0}, // 10 lights
+};
+
 
 #define RING_PATTERN_NOT_CALCULATED 255
 
@@ -801,37 +910,32 @@ void applyLedThrustRingLayer(void)
     const ledConfig_t *ledConfig;
     hsvColor_t ringColor;
     uint8_t ledIndex;
-
-    // initialised to special value instead of using more memory for a flag.
-    static uint8_t rotationSeqLedCount = RING_PATTERN_NOT_CALCULATED;
-    static uint8_t rotationPhase = ROTATION_SEQUENCE_LED_COUNT;
-    bool nextLedOn = false;
-
     uint8_t ledRingIndex = 0;
-    for (ledIndex = 0; ledIndex < ledCount; ledIndex++) {
 
+    static uint8_t rotationPhase = 0;
+
+    int throttle = rcData[THROTTLE];
+    // Set-up the lower color
+    int lowScaled = scaleRange(throttle, PWM_RANGE_MIN, PWM_RANGE_MAX, hsv_green.h, hsv_orange.h);
+    hsvColor_t lowColor = {lowScaled, 0, 255};
+    // Set-up the higher color
+    int highScaled = scaleRange(throttle, PWM_RANGE_MIN, PWM_RANGE_MAX, hsv_orange.h, hsv_red.h);
+    hsvColor_t highColor = {highScaled, 0, 255};
+
+    int sequenceScaled = scaleRange(throttle, PWM_RANGE_MIN, PWM_RANGE_MAX+1, 0, ROTATION_SEQUENCE_COUNT);
+    bool* sequence = rotationSequence[sequenceScaled];
+
+    for (ledIndex = 0; ledIndex < ledCount; ledIndex++) {
         ledConfig = &ledConfigs[ledIndex];
 
         if ((ledConfig->flags & LED_FUNCTION_THRUST_RING) == 0) {
             continue;
         }
 
-        bool applyColor = false;
-        if (ARMING_FLAG(ARMED)) {
-            if ((ledRingIndex + rotationPhase) % rotationSeqLedCount < ROTATION_SEQUENCE_LED_WIDTH) {
-                applyColor = true;
-            }
+        if (sequence[(ledRingIndex + rotationPhase) % ROTATION_SEQUENCE_LED_COUNT]) {
+            ringColor = highColor;
         } else {
-            if (nextLedOn == false) {
-                applyColor = true;
-            }
-            nextLedOn = !nextLedOn;
-        }
-
-        if (applyColor) {
-            ringColor = colors[ledConfig->color];
-        } else {
-            ringColor = hsv_black;
+            ringColor = lowColor;
         }
 
         setLedHsv(ledIndex, &ringColor);
@@ -839,29 +943,19 @@ void applyLedThrustRingLayer(void)
         ledRingIndex++;
     }
 
-    uint8_t ledRingLedCount = ledRingIndex;
-    if (rotationSeqLedCount == RING_PATTERN_NOT_CALCULATED) {
-        // update ring pattern according to total number of ring leds found
+    rotationPhase = (rotationPhase + 1) % ROTATION_SEQUENCE_LED_COUNT;
+}
 
-        rotationSeqLedCount = ledRingLedCount;
-
-        // try to split in segments/rings of exactly ROTATION_SEQUENCE_LED_COUNT leds
-        if ((ledRingLedCount % ROTATION_SEQUENCE_LED_COUNT) == 0) {
-            rotationSeqLedCount = ROTATION_SEQUENCE_LED_COUNT;
-        } else {
-            // else split up in equal segments/rings of at most ROTATION_SEQUENCE_LED_COUNT leds
-            while ((rotationSeqLedCount > ROTATION_SEQUENCE_LED_COUNT) && ((rotationSeqLedCount % 2) == 0)) {
-                rotationSeqLedCount >>= 1;
-            }
+static void clearLedThrustRingLayer(void)
+{
+    uint8_t ledIndex;
+    const ledConfig_t *ledConfig;
+    for (ledIndex = 0; ledIndex < ledCount; ledIndex++) {
+        ledConfig = &ledConfigs[ledIndex];
+        if ((ledConfig->flags & LED_FUNCTION_THRUST_RING) == 0) {
+            continue;
         }
-
-        // trigger start over
-        rotationPhase = 1;
-    }
-
-    rotationPhase--;
-    if (rotationPhase == 0) {
-        rotationPhase = rotationSeqLedCount;
+        setLedHsv(ledIndex, &hsv_black);
     }
 }
 
@@ -924,22 +1018,21 @@ void updateLedStrip(void)
     } else {
         ledStripEnabled = true;
     }
-    
+
     if (!ledStripEnabled){
         return;
     }
-    
 
     uint32_t now = micros();
 
-    bool indicatorFlashNow = (int32_t)(now - nextIndicatorFlashAt) >= 0L;
+    //bool indicatorFlashNow = (int32_t)(now - nextIndicatorFlashAt) >= 0L;
     bool warningFlashNow = (int32_t)(now - nextWarningFlashAt) >= 0L;
     bool rotationUpdateNow = (int32_t)(now - nextRotationUpdateAt) >= 0L;
 #ifdef USE_LED_ANIMATION
     bool animationUpdateNow = (int32_t)(now - nextAnimationUpdateAt) >= 0L;
 #endif
     if (!(
-            indicatorFlashNow ||
+            //indicatorFlashNow ||
             rotationUpdateNow ||
             warningFlashNow
 #ifdef USE_LED_ANIMATION
@@ -949,7 +1042,8 @@ void updateLedStrip(void)
         return;
     }
 
-    static uint8_t indicatorFlashState = 0;
+    /*
+    //static uint8_t indicatorFlashState = 0;
 
     // LAYER 1
     applyLedModeLayer();
@@ -958,7 +1052,7 @@ void updateLedStrip(void)
     // LAYER 2
 
     if (warningFlashNow) {
-        nextWarningFlashAt = now + LED_STRIP_10HZ;
+        nextWarningFlashAt = now + LED_STRIP_1HZ;
     }
     applyLedWarningLayer(warningFlashNow);
 
@@ -979,6 +1073,7 @@ void updateLedStrip(void)
     }
 
     applyLedIndicatorLayer(indicatorFlashState);
+    */
 
 #ifdef USE_LED_ANIMATION
     if (animationUpdateNow) {
@@ -989,17 +1084,23 @@ void updateLedStrip(void)
 #endif
 
     if (rotationUpdateNow) {
-
-        applyLedThrustRingLayer();
-
-        uint8_t animationSpeedScale = 1;
+        uint8_t animationSpeedScale;
 
         if (ARMING_FLAG(ARMED)) {
-            animationSpeedScale = scaleRange(rcData[THROTTLE], PWM_RANGE_MIN, PWM_RANGE_MAX, 1, 10);
+            animationSpeedScale = scaleRange(rcData[THROTTLE], PWM_RANGE_MIN, PWM_RANGE_MAX, 5, 25);
+            applyLedThrustRingLayer();
+        } else {
+            animationSpeedScale = 10;
+            clearLedThrustRingLayer();
         }
-
-        nextRotationUpdateAt = now + LED_STRIP_5HZ/animationSpeedScale;
+        nextRotationUpdateAt = now + LED_STRIP_1HZ / animationSpeedScale;
     }
+
+    // Ring warning layer
+    if (warningFlashNow) {
+        nextWarningFlashAt = now + LED_STRIP_1HZ / 2;
+    }
+    applyLedRingWarningLayer(warningFlashNow);
 
     ws2811UpdateStrip();
 }
